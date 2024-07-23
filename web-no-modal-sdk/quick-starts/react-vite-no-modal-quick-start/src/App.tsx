@@ -6,9 +6,10 @@ import { EthereumPrivateKeyProvider } from "@web3auth/ethereum-provider";
 import { Web3AuthNoModal } from "@web3auth/no-modal";
 import { OpenloginAdapter } from "@web3auth/openlogin-adapter";
 import { useEffect, useState } from "react";
+import liff from "@line/liff";
 import Web3 from "web3";
 
-const clientId = "BPi5PB_UiIZ-cPz1GtV5i1I2iOSOHuimiXBI0e-Oe_u6X3oVAbCiAZOTEBtTXw4tsluTITPqA8zMsfxIKMjiqNQ"; // get from https://dashboard.web3auth.io
+const clientId = "BAvU0yqzqJ_QoZ0ebPVAwC8wb6g3RDzQAtvRUsBfkofe26S0cAOvOjr-Y4Ofg-FeFql0YTnCEMI-u_qq7PI7S38"; // get from https://dashboard.web3auth.io
 
 const chainConfig = {
   chainNamespace: CHAIN_NAMESPACES.EIP155,
@@ -25,16 +26,30 @@ const privateKeyProvider = new EthereumPrivateKeyProvider({ config: { chainConfi
 
 const web3auth = new Web3AuthNoModal({
   clientId,
-  web3AuthNetwork: WEB3AUTH_NETWORK.SAPPHIRE_MAINNET,
+  web3AuthNetwork: WEB3AUTH_NETWORK.SAPPHIRE_DEVNET,
   privateKeyProvider,
 });
 
-const openloginAdapter = new OpenloginAdapter();
+const openloginAdapter = new OpenloginAdapter({
+  adapterSettings: {
+    uxMode: "redirect",
+    loginConfig: {
+      jwt: {
+        verifier: "line-liff-jwt-verifier",
+        typeOfLogin: "jwt",
+        clientId: "BAvU0yqzqJ_QoZ0ebPVAwC8wb6g3RDzQAtvRUsBfkofe26S0cAOvOjr-Y4Ofg-FeFql0YTnCEMI-u_qq7PI7S38",
+      },
+    },
+  },
+  privateKeyProvider,
+});
 web3auth.configureAdapter(openloginAdapter);
 
 function App() {
   const [provider, setProvider] = useState<IProvider | null>(null);
   const [loggedIn, setLoggedIn] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
 
   useEffect(() => {
     const init = async () => {
@@ -49,13 +64,35 @@ function App() {
         console.error(error);
       }
     };
-
     init();
+
+    liff
+        .init({
+          liffId: import.meta.env.VITE_LIFF_ID
+        })
+        .then(() => {
+          setMessage("LIFF init succeeded.");
+        })
+        .catch((e: Error) => {
+          setMessage("LIFF init failed.");
+          setError(`${e}`);
+        });
   }, []);
 
   const login = async () => {
-    const web3authProvider = await web3auth.connectTo(WALLET_ADAPTERS.OPENLOGIN, {
-      loginProvider: "google",
+    let web3authProvider
+    if (liff.isInClient()) {
+      const id_token = liff.getIDToken()
+      web3authProvider = await web3auth.connectTo(WALLET_ADAPTERS.OPENLOGIN, {
+        loginProvider: "jwt",
+        extraLoginOptions: {
+          id_token: id_token, // in JWT Format
+          verifierIdField: "sub", // same as your JWT Verifier ID
+        },
+      });
+    }
+    web3authProvider = await web3auth.connectTo(WALLET_ADAPTERS.OPENLOGIN, {
+      loginProvider: "line",
     });
     setProvider(web3authProvider);
     if (web3auth.connected) {
@@ -134,6 +171,19 @@ function App() {
     uiConsole(signedMessage);
   };
 
+  const getPrivKey = async () => {
+    if (!provider) {
+      uiConsole("provider not initialized yet");
+      return;
+    }
+    // get privatekey request
+    const privateKey = await provider.request({
+      method: "eth_private_key"
+    })
+
+    uiConsole(privateKey);
+  };
+
   const loggedInView = (
     <>
       <div className="flex-container">
@@ -155,6 +205,11 @@ function App() {
         <div>
           <button onClick={signMessage} className="card">
             Sign Message
+          </button>
+        </div>
+        <div>
+          <button onClick={getPrivKey} className="card">
+            Get PrivKey
           </button>
         </div>
         <div>
